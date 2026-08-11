@@ -2,31 +2,15 @@
 
 Hyperscript-flavored shorthand for the htmx [`hx-live`](https://four.htmx.org/extensions/hx-live) extension.
 
-```text
-expression
-    │
-    ▼
-hx-live-hyperscript
-    │  rewrites syntax
-    ▼
-core q() expression
-    │
-    ▼
-hx-live
-```
+It rewrites shorthand expressions to the core `q()` API before `hx-live`
+evaluates them. It adds syntax, not state or runtime behavior.
 
-It adds syntax. It does not add state or a runtime API.
+> [!NOTE]
+> Packaging and standalone test infrastructure are still pending.
 
-## Status
+## Load the Extension
 
-```text
-source       ✓ migrated
-tests        ✓ migrated
-packaging    ◌ pending
-standalone   ◌ pending
-```
-
-Load order:
+Load scripts in this order:
 
 ```text
 htmx
@@ -34,22 +18,129 @@ htmx
     └── hx-live-hyperscript
 ```
 
-## State
+The extension source is at
+[`src/ext/hx-live-hyperscript.js`](src/ext/hx-live-hyperscript.js).
 
-Two sigils choose where state lives:
+## Use Local State
 
-```text
-@  selected element
-^  nearest owner, starting at the selected element
+Prefix an attribute with `@` to read or write it on the current element.
+
+```html
+<button aria-pressed="false"
+        hx-on:click="@aria-pressed = !@aria-pressed">
+    Mute
+</button>
+```
+
+The core form is:
+
+```js
+q(this).aria.pressed = !q(this).aria.pressed
+```
+
+The same syntax covers each state namespace:
+
+```js
+@data-count++
+@aria-expanded = true
+@.active = true
+@readonly = true
+```
+
+## Use Shared State
+
+Prefix an attribute with `^` to use its nearest owner, starting at the current
+element.
+
+```html
+<section data-count="0">
+    <button hx-on:click="^data-count++">Add</button>
+    <output :text="^data-count"></output>
+</section>
 ```
 
 ```text
-<section data-count="1">
-    <button>+</button>
-       │       │
-       │       └── ^data-count  → section
-       └────────── @data-count  → button
+section[data-count]
+       ▲
+       │ ^data-count
+     button
 ```
+
+The core form is:
+
+```js
+q(this).closest.data.count++
+```
+
+Use the same owner lookup after a selection:
+
+```js
+q('.item').^data-open = true
+q('.option').^aria-activedescendant = this.id
+```
+
+## Select Elements
+
+Use `#id` for an ID or `<.../>` for any selector accepted by `q()`.
+
+```js
+#cart.@data-count++
+<.row/>.@hidden = true
+<previous input/>.@value
+<.error/>.^data-invalid = true
+```
+
+```text
+#cart              → q('#cart')
+<.row/>            → q('.row')
+<previous input/>  → q('previous input')
+```
+
+Directional selectors use the core `q()` grammar:
+
+```js
+<first .item/>
+<last .item/>
+<next .item/>
+<previous .item/>
+<closest .field/>
+<.item in #panel/>
+```
+
+## Continue from a Selection
+
+Use `'s` to access state or a property from a selector literal.
+
+```js
+#cart's @data-count++
+<.field/>'s @value
+```
+
+It is equivalent to continuing through the selected `q()` proxy.
+
+## Name Attributes in Helpers
+
+Inside `toggle()` and `take()`, a sigil replaces the string attribute name.
+
+```js
+toggle(@aria-expanded)
+toggle(@data-view, 'grid', 'list')
+take(@aria-selected)
+take(@.active)
+```
+
+These have the same behavior as:
+
+```js
+toggle('aria-expanded')
+toggle('data-view', 'grid', 'list')
+take('aria-selected')
+take('.active')
+```
+
+## Reference
+
+### Attribute Sigils
 
 | Shorthand | Core expression |
 | --- | --- |
@@ -62,15 +153,9 @@ Two sigils choose where state lives:
 | `@readonly` | `q(this).attr.readonly` |
 | `^readonly` | `q(this).closest.attr.readonly` |
 
-Use a sigil after `q()` to target another selection:
+### Namespaces
 
-```js
-q('#cart').@data-count++
-q('.tab').@aria-selected = true
-q('.item').^data-open = true
-```
-
-Whole namespaces stay available:
+Use a wildcard or `@class` to access a whole namespace:
 
 ```js
 { ...@data-* }
@@ -78,86 +163,53 @@ Whole namespaces stay available:
 @class.assign({ active: true, loading: false })
 ```
 
-## Selectors
+### Selector Literals
 
-Selector literals remove the `q('...')` wrapper:
+| Shorthand | Core expression |
+| --- | --- |
+| `#cart` | `q('#cart')` |
+| `<.row/>` | `q('.row')` |
+| `<previous input/>` | `q('previous input')` |
+| `<.item in #panel/>` | `q('.item in #panel')` |
 
-```text
-#cart              → q('#cart')
-<.row/>            → q('.row')
-<previous input/>  → q('previous input')
-```
+## How It Works
 
-```js
-#cart.@data-count++
-<.row/>.@hidden = true
-<previous input/>.@value
-<.error/>.^data-invalid = true
-```
-
-Directional selectors use the same grammar as `q()`:
+The extension hooks into expression compilation and rewrites supported syntax:
 
 ```text
-<first .item/>
-<last .item/>
-<next .item/>
-<previous .item/>
-<closest .field/>
-<.item in #panel/>
+HTML expression
+      │
+      ▼
+hx-live-hyperscript
+      │  syntax rewrite
+      ▼
+core q() expression
+      │
+      ▼
+hx-live evaluation
 ```
 
-## Possessives
-
-`'s` continues from a selector literal:
-
-```js
-#cart's @data-count++
-<.field/>'s @value
-```
+For example:
 
 ```text
-#cart's @data-count
-  │          │
-  │          └── state on #cart
-  └───────────── selected element
+^data-count++
+      ↓
+q(this).closest.data.count++
 ```
 
-## Helpers
-
-Inside `toggle()` and `take()`, sigils replace string attribute names:
-
-```text
-toggle(@aria-expanded)               toggle('aria-expanded')
-toggle(@data-view, 'grid', 'list')   toggle('data-view', 'grid', 'list')
-take(@aria-selected)                 take('aria-selected')
-take(@.active)                       take('.active')
-```
-
-Both columns have the same behavior.
-
-## Boundaries
-
-The rewriter skips:
-
-```text
-strings
-comments
-regular expressions
-raw template text
-```
-
-Normal JavaScript keeps its meaning when a value comes first:
+The rewriter skips strings, comments, regular expressions, and raw template
+text. Normal JavaScript keeps its meaning when a value comes first:
 
 ```js
 flags ^ mask
 count < max
 ```
 
-## Files
+## Development
 
 ```text
-src/ext/hx-live-hyperscript.js
-test/tests/ext/hx-live-hyperscript.js
+src/ext/hx-live-hyperscript.js        extension source
+test/tests/ext/hx-live-hyperscript.js browser tests
 ```
 
 ## License
